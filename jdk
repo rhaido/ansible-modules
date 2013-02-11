@@ -1,0 +1,91 @@
+#!/bin/bash
+
+set -x
+
+source ${1}
+
+if [[ -z "${pro}" && -z "${testing}" ]]; then
+  echo "msg=\"Please, specify pro JDK version or testing JDK versions to deal with\""
+  exit 5
+fi
+
+if [[ ! -z "${testing}" ]]; then
+  testing=${testing//,/ }
+fi 
+
+if [[ ! -z "$pro" ]]; then
+  if ! rpmquery --quiet jdk${pro}; then
+    echo "msg=\"JDK rpm jdk${pro} should be installed in advance to use this module functionality\""
+    exit 6
+  fi
+
+  if [[ ! -d /usr/java/jdk${pro} ]]; then
+    echo "msg=\"No such directory - /usr/java/jdk${pro} to link to -- exit\""
+    exit 7
+  fi
+
+  if [[ -L /usr/java/jdk && "$(readlink /usr/java/jdk)" != "/usr/java/jdk${pro}" ]]; then
+      unlink /usr/java/jdk
+  fi
+
+  ln -sf /usr/java/jdk${pro} /usr/java/jdk
+fi
+
+export JDK_PRO="jdk${pro}"
+
+if [[ ! -f /usr/local/share/acc-jdk/jdk-rpm-functions.sh ]]; then
+  echo "msg=Could not find /usr/local/share/acc-jdk/jdk-rpm-functions.sh shell library, try to install acc-jdk-helpers rpm from acc-external-do repo"
+  exit 1
+fi
+
+if [[ ! -r /usr/local/share/acc-jdk/jdk-rpm-functions.sh ]]; then
+    echo "msg=File /usr/local/share/acc-jdk/jdk-rpm-functions.sh is not readable"
+    exit 2
+fi
+
+source /usr/local/share/acc-jdk/jdk-rpm-functions.sh
+
+changed="False"
+msg=""
+
+for version in ${pro} ${testing}
+do
+  java_sec_policy=""
+
+  [[ -f /usr/java/jdk${version}/jre/lib/security/java.policy ]] && \
+    java_sec_policy="/usr/java/jdk${version}/jre/lib/security/java.policy" || \
+    java_sec_policy=$( rpm -ql jdk${version} | grep java.policy )
+
+  [[ ! -z "$java_sec_policy" ]] && hack_java_policy $java_sec_policy
+done
+
+if [[ -z "${alternatives}" || "${alternatives}" != "no" ]]; then
+  prio=${alternatives-20000}
+  jdk_alternatives_dictate ${prio}
+fi
+
+[[ -z "${moz_plugin}" || "${moz_plugin}" != "no" ]] && l_msg=$(mozilla_plugin_dictate)
+[[ ! -z "${l_msg}" ]] && msg="${msg}; ${l_msg}"
+
+[[ -z "${mime}" || "${mime}" != "no" ]] && l_msg=$(mime_update)
+[[ ! -z "${l_msg}" ]] && msg="${msg}; ${l_msg}"
+
+[[ -z "${mailcap}" || "${mailcap}" != "no" ]] && l_msg=$(mailcap_update)
+[[ ! -z "${l_msg}" ]] && msg="${msg}; ${l_msg}"
+
+[[ -z "${desktop_fix}" || "${desktop_fix}" != "no" ]] && javaws_desktop_fix
+
+if echo $msg | grep -q 'error'; then
+  failed=True
+fi
+
+[[ -z "${msg}" ]] && msg="OK" || changed="True"
+
+if [[ "${failed}" != "True" ]]; then
+  echo "changed=${changed} msg=\"${msg}\""
+else
+  echo "failed=${failed} msg=\"${msg}\""
+fi
+
+exit 0
+
