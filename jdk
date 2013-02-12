@@ -48,16 +48,18 @@ source /usr/local/share/acc-jdk/jdk-rpm-functions.sh
 changed="False"
 msg=""
 
-for version in ${pro} ${testing}
-do
-  java_sec_policy=""
+if [[ -z "${security_patch}" || "${security_patch}" == "yes" ]]; then
+  for version in ${pro} ${testing}
+  do
+    java_sec_policy=""
 
-  [[ -f /usr/java/jdk${version}/jre/lib/security/java.policy ]] && \
-    java_sec_policy="/usr/java/jdk${version}/jre/lib/security/java.policy" || \
-    java_sec_policy=$( rpm -ql jdk${version} | grep java.policy )
+    [[ -f /usr/java/jdk${version}/jre/lib/security/java.policy ]] && \
+      java_sec_policy="/usr/java/jdk${version}/jre/lib/security/java.policy" || \
+      java_sec_policy=$( rpm -ql jdk${version} | grep java.policy )
 
-  [[ ! -z "$java_sec_policy" ]] && hack_java_policy $java_sec_policy
-done
+    [[ ! -z "$java_sec_policy" ]] && hack_java_policy $java_sec_policy
+  done
+fi
 
 if [[ -z "${alternatives}" || "${alternatives}" != "no" ]]; then
   prio=${alternatives-20000}
