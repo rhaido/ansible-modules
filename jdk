@@ -49,13 +49,26 @@ changed="False"
 msg=""
 
 if [[ -z "${security_patch}" || "${security_patch}" == "yes" ]]; then
-  for version in ${pro} ${testing}
+  to_patch=""
+
+  if [[ ! -z "${jdk_to_patch}" ]]; then
+    for i in ${jdk_to_patch//,/ }
+    do
+      [[ "${i}" =~ ^1\.[67]\.0_[0-4][0-9]$ ]] && to_patch="$to_patch $i"
+    done
+  else
+    to_patch="${pro} ${testing}"
+  fi
+
+  for version in ${to_patch}
   do
     java_sec_policy=""
 
     [[ -f /usr/java/jdk${version}/jre/lib/security/java.policy ]] && \
-      java_sec_policy="/usr/java/jdk${version}/jre/lib/security/java.policy" || \
-      java_sec_policy=$( rpm -ql jdk${version} | grep java.policy )
+      java_sec_policy="/usr/java/jdk${version}/jre/lib/security/java.policy" \
+      || \
+      rpmquery --quiet jdk${version} && \
+      java_sec_policy=$(rpm -ql jdk${version} | grep java.policy)
 
     [[ ! -z "$java_sec_policy" ]] && hack_java_policy $java_sec_policy
   done
