@@ -1,0 +1,120 @@
+#!/bin/bash
+
+source ${1}
+
+# - disablerepo
+#   required - no
+#   Repoid of repositories to disable for the install/update operation. These repos will not persist beyond the transaction. Multiple repos separated with a ',' (added in Ansible 0.9).
+# - enablerepo
+#   required: no
+#   Repoid of repositories to enable for the install/update operation. These repos will not persist beyond the transaction multiple repos separated with a ',' (added in Ansible 0.9)
+# - name
+#   requried: yes
+#   Package name, or package specifier with version, like name-1.0.
+# - state
+#   required: no
+#   default: present	
+#   choices: present latest absent
+#   Whether to install (present, latest), or remove (absent) a package.
+
+set -x
+
+FAILED=no
+YUM_REPOS=/etc/yum.repos.d
+
+# Check the input first
+
+if [[ -z ${name} ]]; then
+  echo "msg=\"Please, specify the name of the package to deal with\""
+  exit 5
+fi
+
+if [[ ! -z ${state} ]]; then
+  case $state in
+    'present'|'latest'|'absent')
+      ;;
+    *)
+      echo "msg=\"Please, specify the correct state: present, absent or latest\""
+      exit 5
+      ;;
+  esac
+else
+  state="present"
+fi
+
+if [[ ! -z "${enablerepo}" || ! -z "${disablerepo}" ]]; then
+  for i in ${enablerepo//,/ } ${disablerepo//,/ }
+  do
+    if ! grep -q "\[$i\]" $YUM_REPOS/*.repo; then
+      FAILED=yes
+      failed_repos="$failed_repos $i"
+    fi
+  done
+
+  if [[ ${FAILED} == "yes" ]]; then
+    echo "msg=\"The following repos could not be found in yum configuration in $YUM_REPOS directory:${failed_repos}\""
+    exit 4
+  fi
+fi
+
+# Do the actions, finally
+
+if [[ ! -z ${name} ]]; then
+  name=${name//,/ }
+fi
+
+cmd="yum -q -y"
+target=""
+
+[[ ! -z "${enablerepo}" && ${state} != "absent" ]] && cmd="$cmd --enablerepo=\"${enablerepo}\""
+[[ ! -z "${disablerepo}" && ${state} != "absent" ]] && cmd="$cmd --disablerepo=\"${disablerepo}\""
+
+case $state in
+  'present')
+    for i in $name
+    do
+      if ! rpmquery --quiet $i; then
+        cmd="${cmd} install"
+        target="${target} ${i}"
+      fi
+    done 
+
+    if [[ ! -z "${target}" ]]; then
+      if $cmd $i; then
+        changed=True
+      fi
+    fi
+    ;;
+
+  'latest')
+    for i in $name
+    do
+      if ! rpmquery --quiet $i; then
+        [[ -z "${cmd1}" ]] && cmd1="$cmd install"
+        target1="${target1} $i"
+      else
+        cmd="$cmd update"
+        target="${target} $i"
+      fi
+
+      if $cmd $target; then
+        changed=True
+      fi
+
+      if $cmd1 $i; then
+        changed=True
+      fi
+    done
+    ;;
+
+  'absent')
+    if rpmquery --quiet $i; then
+      cmd="$cmd remove"
+
+      if $cmd $i; then
+        changed=True
+      fi
+    fi
+    ;;
+esac
+
