@@ -68,8 +68,8 @@ fi
 
 cmd="yum -q -y"
 
-[[ ! -z "${enablerepo}" && ${state} != "absent" ]] && cmd="$cmd --enablerepo=\"${enablerepo}\""
-[[ ! -z "${disablerepo}" && ${state} != "absent" ]] && cmd="$cmd --disablerepo=\"${disablerepo}\""
+[[ ! -z "${enablerepo}" && ${state} != "absent" ]] && cmd="$cmd --enablerepo=${enablerepo}"
+[[ ! -z "${disablerepo}" && ${state} != "absent" ]] && cmd="$cmd --disablerepo=${disablerepo}"
 
 case ${state} in
   'present')
