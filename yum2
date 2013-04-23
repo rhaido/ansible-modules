@@ -35,7 +35,7 @@ fi
 [[ -z "${state}" ]] && state="present"
 
 case $state in
-  'present'|'latest'|'absent')
+  'present'|'latest'|'absent'|'installed')
     ;;
   *)
     echo "failed=\"True\" msg=\"Please, specify the correct state: present, absent or latest\""
@@ -70,7 +70,7 @@ cmd="yum -q -y"
 [[ ! -z "${disablerepo}" && ${state} != "absent" ]] && cmd="$cmd --disablerepo=${disablerepo}"
 
 case ${state} in
-  'present')
+  'present'|'installed')
     # collect the names of the packages to install - do not install already installed
     for i in ${name}
     do
