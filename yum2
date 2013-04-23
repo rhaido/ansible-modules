@@ -1,7 +1,8 @@
 #!/bin/bash
 
-source ${1}
-
+#
+# Mike Grozak <mike.grozak@gmail.com>
+#
 # - disablerepo
 #   required - no
 #   Repoid of repositories to disable for the install/update operation. These repos will not persist beyond the transaction. Multiple repos separated with a ',' (added in Ansible 0.9).
@@ -19,17 +20,19 @@ source ${1}
 
 set -x
 
+source ${1}
+
 FAILED=no
 YUM_REPOS=/etc/yum.repos.d
 
-# Check the input first
+# Check the correctness of the input first
 
-if [[ -z ${name} ]]; then
+if [[ -z "${name}" ]]; then
   echo "msg=\"Please, specify the name of the package to deal with\""
   exit 5
 fi
 
-if [[ ! -z ${state} ]]; then
+if [[ ! -z "${state}" ]]; then
   case $state in
     'present'|'latest'|'absent')
       ;;
@@ -64,57 +67,73 @@ if [[ ! -z ${name} ]]; then
 fi
 
 cmd="yum -q -y"
-target=""
 
 [[ ! -z "${enablerepo}" && ${state} != "absent" ]] && cmd="$cmd --enablerepo=\"${enablerepo}\""
 [[ ! -z "${disablerepo}" && ${state} != "absent" ]] && cmd="$cmd --disablerepo=\"${disablerepo}\""
 
-case $state in
+case ${state} in
   'present')
-    for i in $name
+    # collect the names of the packages to install - do not install already installed
+    for i in ${name}
     do
-      if ! rpmquery --quiet $i; then
-        cmd="${cmd} install"
-        target="${target} ${i}"
-      fi
+      ! rpmquery --quiet $i && to_install="${to_install} ${i}"
     done 
 
-    if [[ ! -z "${target}" ]]; then
-      if $cmd $i; then
-        changed=True
+    if [[ ! -z "${to_install}" ]]; then
+      cmd="${cmd} install"
+
+      if ${cmd} ${to_install} 2>&1 &>/dev/null; then
+        changed="True"
       fi
     fi
     ;;
 
   'latest')
-    for i in $name
+    # Collect the packages to install/update first
+    for i in ${name}
     do
       if ! rpmquery --quiet $i; then
-        [[ -z "${cmd1}" ]] && cmd1="$cmd install"
-        target1="${target1} $i"
+        to_install="${to_install} $i"
       else
-        cmd="$cmd update"
-        target="${target} $i"
-      fi
-
-      if $cmd $target; then
-        changed=True
-      fi
-
-      if $cmd1 $i; then
-        changed=True
+        to_update="${to_update} $i"
       fi
     done
-    ;;
 
-  'absent')
-    if rpmquery --quiet $i; then
-      cmd="$cmd remove"
+    # install/update packages
+    if [[ ! -z "${to_install}" ]]; then
+      cmd1="${cmd} install"
 
-      if $cmd $i; then
-        changed=True
+      if ${cmd1} ${to_install} 2>&1 &>/dev/null; then
+        changed="True"
+      fi
+    fi
+
+    if [[ ! -z "${to_update}" ]]; then
+      cmd2="${cmd} update"
+
+      if ${cmd2} ${to_update} 2>&1 &>/dev/null; then
+        changed="True"
       fi
     fi
     ;;
+
+  'absent')
+    to_remove=''
+
+    for i in ${name}
+    do
+      rpmquery --quiet $i && to_remove="${to_remove} $i"
+    done
+
+    if [[ ! -z "${to_remove}" ]]; then
+      cmd="$cmd remove"
+      ${cmd} ${to_remove} 2>&1 &>/dev/null && changed="True"
+    fi
+    ;;
 esac
+
+[[ -z "${msg}" ]] && msg="OK"
+[[ -z "${changed}" ]] && changed="False"
+
+echo "msg=\"${msg}\" changed=\"${changed}\""
 
