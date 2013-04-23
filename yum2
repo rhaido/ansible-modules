@@ -32,11 +32,10 @@ if [[ -z "${name}" ]]; then
   exit 5
 fi
 
+[[ -z "${state}" ]] && state="present"
+
 case $state in
   'present'|'latest'|'absent')
-    ;;
-  '')
-    state="present"
     ;;
   *)
     echo "failed=\"True\" msg=\"Please, specify the correct state: present, absent or latest\""
