@@ -28,22 +28,21 @@ YUM_REPOS=/etc/yum.repos.d
 # Check the correctness of the input first
 
 if [[ -z "${name}" ]]; then
-  echo "msg=\"Please, specify the name of the package to deal with\""
+  echo "failed=\"True\" msg=\"Please, specify the name of the package to deal with\""
   exit 5
 fi
 
-if [[ ! -z "${state}" ]]; then
-  case $state in
-    'present'|'latest'|'absent')
-      ;;
-    *)
-      echo "msg=\"Please, specify the correct state: present, absent or latest\""
-      exit 5
-      ;;
-  esac
-else
-  state="present"
-fi
+case $state in
+  'present'|'latest'|'absent')
+    ;;
+  '')
+    state="present"
+    ;;
+  *)
+    echo "failed=\"True\" msg=\"Please, specify the correct state: present, absent or latest\""
+    exit 5
+    ;;
+esac
 
 if [[ ! -z "${enablerepo}" || ! -z "${disablerepo}" ]]; then
   for i in ${enablerepo//,/ } ${disablerepo//,/ }
@@ -55,7 +54,7 @@ if [[ ! -z "${enablerepo}" || ! -z "${disablerepo}" ]]; then
   done
 
   if [[ ${FAILED} == "yes" ]]; then
-    echo "msg=\"The following repos could not be found in yum configuration in $YUM_REPOS directory:${failed_repos}\""
+    echo "failed=\"True\" msg=\"The following repos could not be found in yum configuration in $YUM_REPOS directory:${failed_repos}\""
     exit 4
   fi
 fi
@@ -111,8 +110,12 @@ case ${state} in
     if [[ ! -z "${to_update}" ]]; then
       cmd2="${cmd} update"
 
+      version="$(rpmquery --queryformat=\"%{VERSION}-%{RELEASE}\" ${to_update})"
+
       if ${cmd2} ${to_update} 2>&1 &>/dev/null; then
-        changed="True"
+        version_now="$(rpmquery --queryformat=\"%{VERSION}-%{RELEASE}\" ${to_update})"
+
+        [[ "${version}" != "${version_now}" ]] && changed="True"
       fi
     fi
     ;;
