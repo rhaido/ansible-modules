@@ -17,12 +17,15 @@
 #   default: present	
 #   choices: present latest absent
 #   Whether to install (present, latest), or remove (absent) a package.
+# - options
+#   Various options to yum
+
+#exec 2>/tmp/yum2.log
 
 set -x
 
 source ${1}
 
-FAILED=no
 YUM_REPOS=/etc/yum.repos.d
 
 # Check the correctness of the input first
@@ -47,12 +50,12 @@ if [[ ! -z "${enablerepo}" || ! -z "${disablerepo}" ]]; then
   for i in ${enablerepo//,/ } ${disablerepo//,/ }
   do
     if ! grep -q "\[$i\]" $YUM_REPOS/*.repo; then
-      FAILED=yes
+      failed="True"
       failed_repos="$failed_repos $i"
     fi
   done
 
-  if [[ ${FAILED} == "yes" ]]; then
+  if [[ ! -z "${failed}" ]]; then
     echo "failed=\"True\" msg=\"The following repos could not be found in yum configuration in $YUM_REPOS directory:${failed_repos}\""
     exit 4
   fi
@@ -66,24 +69,28 @@ fi
 
 cmd="yum -q -y"
 
-[[ ! -z "${enablerepo}" && ${state} != "absent" ]] && cmd="$cmd --enablerepo=${enablerepo}"
-[[ ! -z "${disablerepo}" && ${state} != "absent" ]] && cmd="$cmd --disablerepo=${disablerepo}"
+to_install=""
+to_update=""
+to_remove=""
+
+[[ ! -z "${enablerepo}" && "${state}" != "absent" ]] && cmd="$cmd --enablerepo=${enablerepo}"
+[[ ! -z "${disablerepo}" && "${state}" != "absent" ]] && cmd="$cmd --disablerepo=${disablerepo}"
+[[ ! -z "${gpgcheck}" && "${gpgcheck}" == "no" ]] && cmd="$cmd --nogpgcheck"
 
 case ${state} in
   'present'|'installed')
     # collect the names of the packages to install - do not install already installed
     for i in ${name}
     do
-      ! rpmquery --quiet $i && to_install="${to_install} ${i}"
+      if [[ "$i" =~ ^.*/.*\.rpm$ ]]; then
+        real_name=$(rpm -q --queryformat "%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n" -p $i)
+
+        ! rpmquery --quiet $real_name && to_install="${to_install} ${i}"
+      else
+        ! rpmquery --quiet $i && to_install="${to_install} ${i}"
+      fi
     done 
 
-    if [[ ! -z "${to_install}" ]]; then
-      cmd="${cmd} install"
-
-      if ${cmd} ${to_install} 2>&1 &>/dev/null; then
-        changed="True"
-      fi
-    fi
     ;;
 
   'latest')
@@ -97,26 +104,6 @@ case ${state} in
       fi
     done
 
-    # install/update packages
-    if [[ ! -z "${to_install}" ]]; then
-      cmd1="${cmd} install"
-
-      if ${cmd1} ${to_install} 2>&1 &>/dev/null; then
-        changed="True"
-      fi
-    fi
-
-    if [[ ! -z "${to_update}" ]]; then
-      cmd2="${cmd} update"
-
-      version="$(rpmquery --queryformat=\"%{VERSION}-%{RELEASE}\" ${to_update})"
-
-      if ${cmd2} ${to_update} 2>&1 &>/dev/null; then
-        version_now="$(rpmquery --queryformat=\"%{VERSION}-%{RELEASE}\" ${to_update})"
-
-        [[ "${version}" != "${version_now}" ]] && changed="True"
-      fi
-    fi
     ;;
 
   'absent')
@@ -127,15 +114,82 @@ case ${state} in
       rpmquery --quiet $i && to_remove="${to_remove} $i"
     done
 
-    if [[ ! -z "${to_remove}" ]]; then
-      cmd="$cmd remove"
-      ${cmd} ${to_remove} 2>&1 &>/dev/null && changed="True"
-    fi
     ;;
 esac
+
+# remove leading space from our strings
+to_install="${to_install# }"
+to_update="${to_update# }"
+to_remove="${to_remove# }"
+
+if [[ ! -z "${to_install}" ]]; then
+  cmd="${cmd} install"
+
+  ${cmd} ${to_install} 2>&1 &>/dev/null
+
+  # check, that the packages were installed sucessfully
+  x=""
+
+  for i in ${to_install}
+  do
+    # if it's local installation - normalize the name
+    if [[ "$i" =~ ^.*/.*\.rpm$ ]]; then
+      i=${i##*/}
+      i=${i/\.rpm/}
+    fi
+
+    ! rpmquery --quiet $i && x="$x $i"
+  done
+
+  x="${x# }"
+
+  if [[ ! -z "$x" ]]; then
+    msg="$x packages has been failed for installation;"
+    
+    [[ "${x}" != "${to_install}" ]] && changed="True" || failed="True"
+  else
+    changed="True"
+  fi
+  ###
+fi
+
+if [[ ! -z "${to_update}" ]]; then
+  cmd2="${cmd} update"
+
+  version="$(rpmquery --queryformat=\"%{VERSION}-%{RELEASE}\" ${to_update})"
+
+  if ${cmd2} ${to_update} 2>&1 &>/dev/null; then
+    version_now="$(rpmquery --queryformat=\"%{VERSION}-%{RELEASE}\" ${to_update})"
+
+    [[ "${version}" != "${version_now}" ]] && changed="True"
+  fi
+fi
+
+if [[ ! -z "${to_remove}" ]]; then
+  cmd="$cmd remove"
+  x=""
+
+  ${cmd} ${to_remove} 2>&1 &>/dev/null && changed="True"
+
+  for i in "${to_remove}"
+  do
+    rpmquery --quiet $i && x="$x $i"
+
+    if [[ ! -z "${x}" ]]; then
+      msg="$x packages has been failed to remove;"
+
+      [[ "${x}" == "${to_remove}" ]] && failed="True"
+    fi
+  done
+fi
 
 [[ -z "${msg}" ]] && msg="OK"
 [[ -z "${changed}" ]] && changed="False"
 
-echo "msg=\"${msg}\" changed=\"${changed}\""
+if [[ -z ${failed} ]]; then
+  echo "msg=\"${msg}\" changed=\"${changed}\""
+else
+  echo "failed=True msg=\"${msg}\""
+  exit 1
+fi
 

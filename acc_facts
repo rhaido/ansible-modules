@@ -1,0 +1,59 @@
+#!/bin/bash
+
+source /acc/sys/Linux/hosts/HOSTSsource || exit 1
+
+role="unknown"
+yum_autoupdate="yes"
+yum_special_schedule="no"
+restrict_ccc="no"
+restrict_dev="no"
+restrict_nfs="no"
+
+if [[ "${_noYumUpdate}," =~ ${_hostShort}, ]]; then
+  yum_autoupdate="no"
+fi
+
+if [[ "${_restrictCCC}," =~ ${_hostShort}, ]]; then
+  restrict_ccc="yes"
+fi
+
+[[ "$_hostShort" == "cwo-966-tstd" ]] && restrict_ccc="yes"
+
+if [[ "${_restrictDEV}," =~ ${_hostShort}, ]]; then
+  restrict_dev="yes"
+fi
+
+if [[ "${_restrictNFS}," =~ ${_hostShort}, ]]; then
+  restrict_nfs="yes"
+fi
+
+[[ "${_hostShort}" =~ cwo-966-tsta|cs-ccr-.*|cwo-ccc-.*|cs-ccc-.* ]] && yum_autoupdate_special="yes"
+
+case $_hostShort in
+  cwe-513-vml*)
+     role="console-vm"
+     ;;
+  cwe-*|cwo-*|abpc*|pcbe*)
+     role="console"
+     ;;
+  cs-ccr-*|cs-ccc-*)
+     role="server"
+     ;;
+  *)
+     ;;
+esac
+
+cat <<EOF
+{
+  "ansible_facts":
+  {
+    "role":"${role}",
+    "bootsrv":"${_admSrv}",
+    "yum_autoupdate":"${yum_autoupdate}",
+    "yum_special_schedule":"${yum_special_schedule}",
+    "restrict_ccc":"${restrict_ccc}",
+    "restrict_dev":"${restrict_dev}",
+    "restrict_nfs":"${restrict_nfs}"
+  }
+}
+EOF
