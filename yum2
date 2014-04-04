@@ -22,7 +22,7 @@
 
 #exec 2>/tmp/yum2.log
 
-set -x
+#set -x
 
 source ${1}
 
@@ -150,7 +150,6 @@ if [[ ! -z "${to_install}" ]]; then
   else
     changed="True"
   fi
-  ###
 fi
 
 if [[ ! -z "${to_update}" ]]; then
