@@ -31,7 +31,7 @@ YUM_REPOS=/etc/yum.repos.d
 # Check the correctness of the input first
 
 if [[ -z "${name}" ]]; then
-  echo "failed=\"True\" msg=\"Please, specify the name of the package to deal with\""
+  echo "{"failed": "True", "msg": "Please, specify the name of the package to deal with"}"
   exit 5
 fi
 
@@ -41,7 +41,7 @@ case $state in
   'present'|'latest'|'absent'|'installed')
     ;;
   *)
-    echo "failed=\"True\" msg=\"Please, specify the correct state: present, absent or latest\""
+    echo '{"failed": "True", "msg": "Please, specify the correct state: present, absent or latest"}'
     exit 5
     ;;
 esac
@@ -56,7 +56,7 @@ if [[ ! -z "${enablerepo}" || ! -z "${disablerepo}" ]]; then
   done
 
   if [[ ! -z "${failed}" ]]; then
-    echo "failed=\"True\" msg=\"The following repos could not be found in yum configuration in $YUM_REPOS directory:${failed_repos}\""
+    echo '{"failed": "True", "msg": "The following repos could not be found in yum configuration in $YUM_REPOS directory:${failed_repos}}"}'
     exit 4
   fi
 fi
@@ -183,12 +183,12 @@ if [[ ! -z "${to_remove}" ]]; then
 fi
 
 [[ -z "${msg}" ]] && msg="OK"
-[[ -z "${changed}" ]] && changed="False"
+[[ -z "${changed}" ]] && changed="false"
 
 if [[ -z ${failed} ]]; then
-  echo "msg=\"${msg}\" changed=\"${changed}\""
+  echo '{"msg": "${msg}", "changed": "${changed}"}'
 else
-  echo "failed=True msg=\"${msg}\""
+  echo '{"failed": "true", "msg": "${msg}"}'
   exit 1
 fi
 
