@@ -24,6 +24,36 @@
 
 #set -x
 
+function exit_success() {
+  print_json 'msg' 'changed'
+  exit 0
+}
+
+function exit_failed() {
+  print_json 'failed' 'msg'
+  exit 1
+}
+
+function print_json() {
+  echo '{'
+  coma=""
+
+  for arg in $@
+  do
+    [[ -n "${!arg}" ]] && val="${!arg}" || continue
+
+    if echo $val | grep -q "^\["; then
+      echo "   ${coma} \"${arg}\": ${val}"
+    else
+      echo "   ${coma} \"${arg}\": \"${val}\""
+    fi
+
+    [[ -z "${coma}" ]] && coma=","
+  done
+  echo '}'
+}
+
+
 source ${1}
 
 YUM_REPOS=/etc/yum.repos.d
@@ -31,8 +61,10 @@ YUM_REPOS=/etc/yum.repos.d
 # Check the correctness of the input first
 
 if [[ -z "${name}" ]]; then
-  echo "{"failed": "True", "msg": "Please, specify the name of the package to deal with"}"
-  exit 5
+  failed="True"
+  msg="Please, specify the name of the package to deal with"
+
+  exit_failed
 fi
 
 [[ -z "${state}" ]] && state="present"
@@ -41,8 +73,9 @@ case $state in
   'present'|'latest'|'absent'|'installed')
     ;;
   *)
-    echo '{"failed": "True", "msg": "Please, specify the correct state: present, absent or latest"}'
-    exit 5
+    failed="True"
+    msg="Please, specify the correct state: present, absent or latest"
+    exit_failed
     ;;
 esac
 
@@ -56,13 +89,13 @@ if [[ ! -z "${enablerepo}" || ! -z "${disablerepo}" ]]; then
   done
 
   if [[ ! -z "${failed}" ]]; then
-    echo '{"failed": "True", "msg": "The following repos could not be found in yum configuration in $YUM_REPOS directory:${failed_repos}}"}'
-    exit 4
+    failed="True"
+    msg="The following repos could not be found in yum configuration in $YUM_REPOS directory:${failed_repos}"
+    exit_failed
   fi
 fi
 
 # Do the actions, finally
-
 if [[ ! -z ${name} ]]; then
   name=${name//,/ }
 fi
@@ -186,9 +219,8 @@ fi
 [[ -z "${changed}" ]] && changed="false"
 
 if [[ -z ${failed} ]]; then
-  echo '{"msg": "${msg}", "changed": "${changed}"}'
+  exit_success
 else
-  echo '{"failed": "true", "msg": "${msg}"}'
-  exit 1
+  exit_failed
 fi
 
