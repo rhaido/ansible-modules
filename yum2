@@ -14,7 +14,7 @@
 #   Package name, or package specifier with version, like name-1.0.
 # - state
 #   required: no
-#   default: present	
+#   default: present
 #   choices: present latest absent
 #   Whether to install (present, latest), or remove (absent) a package.
 # - options
@@ -122,7 +122,7 @@ case ${state} in
       else
         ! rpmquery --quiet $i && to_install="${to_install} ${i}"
       fi
-    done 
+    done
 
     ;;
 
@@ -171,14 +171,20 @@ if [[ ! -z "${to_install}" ]]; then
       i=${i/\.rpm/}
     fi
 
-    ! rpmquery --quiet $i && x="$x $i"
+    if
+        [ "${i:0:1}" == "@" ]
+    then
+        yum grouplist "${i:1}" | grep -q "Installed"
+    else
+        ! rpmquery --quiet $i && x="$x $i"
+    fi
   done
 
   x="${x# }"
 
   if [[ ! -z "$x" ]]; then
     msg="$x packages has been failed for installation;"
-    
+
     [[ "${x}" != "${to_install}" ]] && changed="True" || failed="True"
   else
     changed="True"
@@ -205,7 +211,13 @@ if [[ ! -z "${to_remove}" ]]; then
 
   for i in "${to_remove}"
   do
-    rpmquery --quiet $i && x="$x $i"
+    if
+        [ "${i:0:1}" == "@" ]
+    then
+        yum grouplist "${i:1}" | grep -q "Available"
+    else
+        rpmquery --quiet $i && x="$x $i"
+    fi
 
     if [[ ! -z "${x}" ]]; then
       msg="$x packages has been failed to remove;"
