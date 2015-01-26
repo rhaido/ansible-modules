@@ -180,7 +180,7 @@ if [[ ! -z "${to_install}" ]]; then
       i=${i/\.rpm/}
     fi
 
-    ! rpmquery --quiet --whatprovides $i && x="$x $i"
+    ! rpmquery --quiet $i && ! rpmquery --quiet --whatprovides $i && x="$x $i"
   done
 
   x="${x# }"
@@ -197,10 +197,22 @@ fi
 if [[ ! -z "${to_update}" ]]; then
   cmd2="${cmd} update"
 
-  version="$(rpmquery --whatprovides --queryformat=\"%{VERSION}-%{RELEASE}\" ${to_update})"
+  if
+    rpmquery --quiet ${to_update}
+  then
+    version="$(rpmquery --queryformat=\"%{VERSION}-%{RELEASE}\" ${to_update})"
+  else
+    version="$(rpmquery --whatprovides --queryformat=\"%{VERSION}-%{RELEASE}\" ${to_update})"
+  fi
 
   if ${cmd2} ${to_update} 2>&1 &>/dev/null; then
-    version_now="$(rpmquery --whatprovides --queryformat=\"%{VERSION}-%{RELEASE}\" ${to_update})"
+    if
+      rpmquery --quiet ${to_update}
+    then
+      version_now="$(rpmquery --queryformat=\"%{VERSION}-%{RELEASE}\" ${to_update})"
+    else
+      version_now="$(rpmquery --whatprovides --queryformat=\"%{VERSION}-%{RELEASE}\" ${to_update})"
+    fi
 
     [[ "${version}" != "${version_now}" ]] && changed="true"
   fi
@@ -214,7 +226,7 @@ if [[ ! -z "${to_remove}" ]]; then
 
   for i in "${to_remove}"
   do
-    rpmquery --quiet --whatprovides $i && x="$x $i"
+    ( rpmquery --quiet $i || rpmquery --quiet --whatprovides $i ) && x="$x $i"
 
     if [[ ! -z "${x}" ]]; then
       msg="$x packages has been failed to remove;"
