@@ -195,7 +195,8 @@ if [[ ! -z "${to_install}" ]]; then
 fi
 
 if [[ ! -z "${to_update}" ]]; then
-  cmd2="${cmd} update"
+  # this respect globs with version numbers
+  cmd2="${cmd} update-to"
 
   version="$(rpmquery --queryformat=\"%{VERSION}-%{RELEASE}\" ${to_update})"
 
