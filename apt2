@@ -1,0 +1,325 @@
+#!/bin/bash
+
+#
+# Mike Grozak <mike.grozak@gmail.com>
+#
+# - disablerepo
+#   required - no
+#   Repoid of repositories to disable for the install/update operation. These repos will not persist beyond the transaction. Multiple repos separated with a ',' (added in Ansible 0.9).
+# - enablerepo
+#   required: no
+#   Repoid of repositories to enable for the install/update operation. These repos will not persist beyond the transaction multiple repos separated with a ',' (added in Ansible 0.9)
+# - name
+#   requried: yes
+#   Package name, or package specifier with version, like name-5.2=5.2.6-102030.
+# - state
+#   required: no
+#   default: present	
+#   choices: present latest absent
+#   Whether to install (present, latest), or remove (absent) a package.
+# - options
+#   Various options to yum
+# - gpgcheck
+#   required: no
+#   default: not specified
+#   choices: no
+#   Disable the gpg check of yum by suppliying --nogpgcheck CLI option
+# - allowheld
+#   required: no
+#   default: no
+#   choices: yes/no
+#   Allow changing packages on hold
+
+# Uncomment the following strings in order to debug the module
+if [[ "$(hostname -s)" == "workbot41" ]]; then
+  >/tmp/apt2.log
+  exec 2>>/tmp/apt2.log
+  set -x
+fi
+
+function exit_success() {
+  print_json 'msg' 'changed'
+  exit 0
+}
+
+function exit_failed() {
+  print_json 'failed' 'msg'
+  exit 1
+}
+
+function print_json() {
+  echo '{'
+  coma=""
+
+  for arg in $@
+  do
+    [[ -n "${!arg}" ]] && val="${!arg}" || continue
+
+    if [[ $val =~ ^\[ ]]; then
+      echo "   ${coma} \"${arg}\": ${val}"
+    else
+      if [[ $arg == "changed" || $arg == "failed" ]]; then
+        echo "   ${coma} \"${arg}\": ${val}"
+      else
+        echo "   ${coma} \"${arg}\": \"${val}\""
+      fi
+    fi
+
+    [[ -z "${coma}" ]] && coma=","
+  done
+  echo '}'
+}
+
+function dpkg_status() {
+
+  if [[ "$i" =~ .+=.+ ]]; then
+    pkg_name=${1//=*}
+    pkg_version=${1##*=}
+  else
+    pkg_name=$1
+  fi
+
+  dpkg-query -s $pkg_name >/dev/null 2>&1
+  RETVAL=$?
+  
+  [[ "$RETVAL" != "0" ]] && return $RETVAL
+
+  status="$(dpkg-query -s $pkg_name | grep ^Status | awk '{  $1=""; print substr($0,2); }')"
+
+  if echo $status | egrep -q 'not-installed|deinstall'; then
+    return 444;
+  fi
+
+  if [[ -n "$pkg_version" ]]; then
+    installed_version=$(dpkg-query -s $pkg_name | grep ^Version | tr -d ' ' | sed 's/^Version://g')
+    
+    [[ "$installed_version" != "$pkg_version" ]] && return 10
+  fi
+
+  return 0
+}
+
+function deb_real_name() {
+  dpkg-deb -f $1 | grep Package | awk '{ print $2 }'
+  return $?
+}
+
+source ${1}
+
+APT_SOURCES=/etc/apt/sources.list
+APT_REPOS=/etc/apt/sources.list.d
+DEB_TMP=/var/cache/robman/deb
+
+# Check the correctness of the input first
+
+if [[ -z "${name}" ]]; then
+  failed="true"
+  msg="Please, specify the name of the package to deal with"
+
+  exit_failed
+fi
+
+[[ -z "${state}" ]] && state="present"
+
+case $state in
+  'present'|'latest'|'absent'|'installed')
+    ;;
+  *)
+    failed="true"
+    msg="Please, specify the correct state: present, absent or latest"
+    exit_failed
+    ;;
+esac
+
+if [[ ! -z "${enablerepo}" || ! -z "${disablerepo}" ]]; then
+  for i in ${enablerepo//,/ } ${disablerepo//,/ }
+  do
+    if ! grep -q $i $APT_SOURCES $APT_REPOS/*; then
+      failed="true"
+      failed_repos="$failed_repos $i"
+    fi
+  done
+
+  if [[ ! -z "${failed}" ]]; then
+    failed="true"
+    msg="The following repos could not be found in the apt configuration in $APT_REPOS directory:${failed_repos}"
+    exit_failed
+  fi
+fi
+
+if [[ -n "${confold}" && "${confold}" == "yes" ]]; then
+  apt_dpkg_opts="-o Dpkg::Options::='--force-confold' --force-yes"
+fi
+
+# Do the actions, finally
+if [[ ! -z ${name} ]]; then
+  name=${name//,/ }
+fi
+
+cmd="apt-get"
+
+to_install_apt=""
+to_install_deb=""
+to_update=""
+to_remove=""
+
+[[ ! -z "${enablerepo}" && "${state}" != "absent" ]] && cmd="$cmd -t ${enablerepo}"
+[[ ! -z "${gpgcheck}" && "${gpgcheck}" == "no" ]] && cmd="$cmd --allow-unauthenticated"
+[[ -n "${allowheld}" && "${allowheld}" == "yes" ]] && cmd="$cmd --allow-change-held-packages"
+
+case ${state} in
+  'present'|'installed')
+    # collect the names of the packages to install - do not install already installed
+
+    [[ ! -d $DEB_TMP ]] && mkdir -p $DEB_TMP
+
+    for i in ${name}
+    do
+      if [[ "$i" =~ ^.*/.*\.deb$ ]]; then
+        pkg_path="$i"
+
+        if [[ $i =~ ^http ]]; then
+          pkg_name="${i##*/}"
+          [[ ! -f $DEB_TMP/${pkg_name} ]] && wget -O ${DEB_TMP}/${pkg_name} $i
+          [[ -f $DEB_TMP/${pkg_name} ]] && pkg_path="${DEB_TMP}/${pkg_name}" || exit 100
+        fi
+
+        real_name=$(dpkg-deb -f $pkg_path | grep Package | awk '{ print $2 }')
+        ! dpkg_status $real_name && to_install_deb="${to_install_deb} ${pkg_path}"
+      else
+        ! dpkg_status $i && to_install_apt="${to_install_apt} ${i}"
+      fi
+    done 
+
+    ;;
+
+  'latest')
+    # Collect the packages to install/update first
+    for i in ${name}
+    do
+      if [[ "$i" =~ ^.*/.*\.deb$ ]]; then
+        pkg_path="$i"
+
+        if [[ $i =~ ^http ]]; then
+          pkg_name="${i##*/}"
+          [[ ! -f $DEB_TMP/${pkg_name} ]] && wget -O ${DEB_TMP}/${pkg_name} $i
+          [[ -f $DEB_TMP/${pkg_name} ]] && pkg_path="${DEB_TMP}/${pkg_name}" || exit 100
+        fi
+
+        real_name=$(dpkg-deb -f $pkg_path | grep Package | awk '{ print $2 }')
+
+        if ! dpkg_status $real_name || [[ "$(dpkg-deb -W $pkg_path)" != "$(dpkg-query -W $real_name)" ]]; then
+          to_install_deb="${to_install_deb} ${pkg_path}"
+        fi
+      else 
+        to_install_apt="${to_install_apt} $i"
+      fi
+    done
+
+    ;;
+
+  'absent')
+    to_remove=''
+
+    for i in ${name}
+    do
+      dpkg_status $i
+      RETVAL=$?
+
+      [[ $RETVAL -eq 0 || $RETVAL -eq 444 ]] && to_remove="${to_remove} $i"
+    done
+
+    ;;
+esac
+
+# remove leading space from our strings
+to_install_apt="${to_install_apt# }"
+to_install_deb="${to_install_deb# }"
+to_update="${to_update# }"
+to_remove="${to_remove# }"
+
+export DEBIAN_FRONTEND=noninteractive
+
+if [[ ! -z "${to_install_apt}" ]]; then
+  cmd="${cmd} install ${apt_dpkg_opts} -y -q"
+
+  ${cmd} ${to_install_apt} 2>&1 &>/dev/null
+
+  # check, that the packages were installed sucessfully
+  x=""
+
+  for i in ${to_install_apt}
+  do
+    ! dpkg_status $i && x="$x $i"
+  done
+
+  x="${x# }"
+
+  if [[ ! -z "$x" ]]; then
+    msg="$x packages have been failed for installation;"
+    
+    [[ "${x}" != "${to_install_apt}" ]] && changed="true" || failed="true"
+  else
+    changed="true"
+  fi
+fi
+
+if [[ ! -z "${to_install_deb}" ]]; then
+  install_list=""
+
+  cmd="dpkg -i"
+
+  ${cmd} ${to_install_deb} 2>&1 &>/dev/null
+  apt-get install -f -y 2>&1 &>/dev/null
+
+  # check, that the packages were installed sucessfully
+  x=""
+
+  for i in ${to_install_deb}
+  do
+    # if it's local installation - normalize the name
+    ! dpkg_status $(deb_real_name $i) && x="$x $i"
+  done
+
+  x="${x# }"
+
+  if [[ ! -z "$x" ]]; then
+    msg="$x packages have been failed for installation;"
+    
+    [[ "${x}" != "${to_install_deb}" ]] && changed="true" || failed="true"
+  else
+    changed="true"
+  fi
+fi
+
+if [[ ! -z "${to_remove}" ]]; then
+  if [[ "${purge}" == "yes" ]]; then
+    cmd="$cmd purge -y"
+  else
+    cmd="$cmd remove -y"
+  fi
+
+  x=""
+
+  ${cmd} ${to_remove} 2>&1 &>/dev/null && changed="true"
+
+  for i in ${to_remove}
+  do
+    dpkg_status $i && x="$x $i"
+  done
+
+  if [[ ! -z "${x}" ]]; then
+    msg="$x packages has been failed to remove;"
+    [[ "${x}" == "${to_remove}" ]] && failed="true"
+  fi
+fi
+
+[[ -z "${msg}" ]] && msg="OK"
+[[ -z "${changed}" ]] && changed="false"
+
+if [[ -z ${failed} ]]; then
+  exit_success
+else
+  exit_failed
+fi
+
