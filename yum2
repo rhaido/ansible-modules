@@ -27,8 +27,13 @@
 #
 
 # Uncomment the following two strings in order to debug the module
-#exec 2>/tmp/yum2.log
-#set -x
+
+source ${1}
+
+if [[ -n "${debug}" && "${debug}" == "yes" ]]
+  exec 2>/tmp/yum2.log
+  set -x
+fi
 
 function exit_success() {
   print_json 'msg' 'changed'
@@ -62,8 +67,6 @@ function print_json() {
   done
   echo '}'
 }
-
-source ${1}
 
 YUM_REPOS=/etc/yum.repos.d
 
@@ -132,7 +135,6 @@ case ${state} in
         ! rpmquery --quiet $i && to_install="${to_install} ${i}"
       fi
     done 
-
     ;;
 
   'latest')
@@ -165,9 +167,20 @@ to_update="${to_update# }"
 to_remove="${to_remove# }"
 
 if [[ ! -z "${to_install}" ]]; then
-  cmd="${cmd} install"
+  if [[ -z "${module}" ]]; then
+    cmd="${cmd} install"
+    ${cmd} ${to_install} 2>&1 &>/dev/null
+  else
+    if [[ -z "${stream}" ]]; then
+      msg="please specify stream version in addition to a module name -- exit!"
 
-  ${cmd} ${to_install} 2>&1 &>/dev/null
+      exit_failed
+    fi
+
+    ${cmd} module reset ${module} && \
+      ${cmd} module enable ${module}:${stream} && \
+      ${cmd} module install ${module}:${stream}
+  fi
 
   # check, that the packages were installed sucessfully
   x=""
