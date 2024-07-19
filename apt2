@@ -30,13 +30,6 @@
 #   choices: yes/no
 #   Allow changing packages on hold
 
-# Uncomment the following strings in order to debug the module
-if [[ "$(hostname -s)" == "workbot41" ]]; then
-  >/tmp/apt2.log
-  exec 2>>/tmp/apt2.log
-  set -x
-fi
-
 function exit_success() {
   print_json 'msg' 'changed'
   exit 0
@@ -106,9 +99,16 @@ function deb_real_name() {
 
 source ${1}
 
+# Uncomment the following strings in order to debug the module
+if [[ -n "${debug}" && "${debug}" == "enabled" ]]; then
+  >/tmp/apt2.log
+  exec 2>>/tmp/apt2.log
+  set -x
+fi
+
 APT_SOURCES=/etc/apt/sources.list
 APT_REPOS=/etc/apt/sources.list.d
-DEB_TMP=/var/cache/robman/deb
+DEB_TMP=/var/cache/apt2
 
 # Check the correctness of the input first
 
@@ -243,7 +243,7 @@ export DEBIAN_FRONTEND=noninteractive
 if [[ ! -z "${to_install_apt}" ]]; then
   cmd="${cmd} install ${apt_dpkg_opts} -y -q"
 
-  ${cmd} ${to_install_apt} 2>&1 &>/dev/null
+  ${cmd} ${to_install_apt} 2>/tmp/apt2.error 1>/dev/null
 
   # check, that the packages were installed sucessfully
   x=""
@@ -256,7 +256,7 @@ if [[ ! -z "${to_install_apt}" ]]; then
   x="${x# }"
 
   if [[ ! -z "$x" ]]; then
-    msg="$x packages have been failed for installation;"
+    msg="$x packages have been failed for installation ($(cat /tmp/apt2.error));"
     
     [[ "${x}" != "${to_install_apt}" ]] && changed="true" || failed="true"
   else
